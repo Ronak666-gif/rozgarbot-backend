@@ -22,7 +22,12 @@ def call_gemini(prompt):
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     response = http_requests.post(url, json=payload)
     data = response.json()
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+    if "candidates" in data:
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+    elif "error" in data:
+        return f"API Error: {data['error']['message']}"
+    else:
+        return f"Unexpected response: {str(data)}"
 
 def create_booking(worker_name, user_name, date, skill):
     booking = {
