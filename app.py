@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from pymongo import MongoClient
-from google import genai
+import google.generativeai as genai
 from datetime import datetime
 import os
 
@@ -17,7 +17,8 @@ workers_col = db["workers"]
 bookings_col = db["bookings"]
 reviews_col = db["reviews"]
 
-client_gemini = genai.Client(api_key=GEMINI_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 def create_booking(worker_name, user_name, date, skill):
     booking = {
@@ -57,10 +58,7 @@ Tera kaam:
 6. Agar koi worker nahi mila to politely batao
 """
     
-    response = client_gemini.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt
-    )
+    response = model.generate_content(prompt)
     ai_reply = response.text
     
     booking_confirmed = False
