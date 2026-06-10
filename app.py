@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from pymongo import MongoClient
-import google.generativeai as genai
+import requests as http_requests
 from datetime import datetime
 import os
 
@@ -17,8 +17,12 @@ workers_col = db["workers"]
 bookings_col = db["bookings"]
 reviews_col = db["reviews"]
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-pro")
+def call_gemini(prompt):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    response = http_requests.post(url, json=payload)
+    data = response.json()
+    return data["candidates"][0]["content"]["parts"][0]["text"]
 
 def create_booking(worker_name, user_name, date, skill):
     booking = {
@@ -40,8 +44,7 @@ def chat():
     all_workers = list(workers_col.find({"available": True}, {"_id": 0}))
     workers_str = str(all_workers)
     
-    prompt = f"""
-Tu RozgarBot hai — ek AI agent jo India mein daily-wage workers (plumber, electrician, maid, driver, carpenter, cook) ko households se connect karta hai.
+    prompt = f"""Tu RozgarBot hai — ek AI agent jo India mein daily-wage workers (plumber, electrician, maid, driver, carpenter, cook) ko households se connect karta hai.
 
 Available Workers Database (MongoDB se):
 {workers_str}
@@ -55,11 +58,9 @@ Tera kaam:
 3. Agar user book karna chahta hai to booking confirm karo
 4. Friendly Hinglish mein jawab do
 5. Worker ka naam, skill, area, price aur rating clearly batao
-6. Agar koi worker nahi mila to politely batao
-"""
+6. Agar koi worker nahi mila to politely batao"""
     
-    response = model.generate_content(prompt)
-    ai_reply = response.text
+    ai_reply = call_gemini(prompt)
     
     booking_confirmed = False
     if any(word in user_message.lower() for word in ["book", "confirm", "chahiye", "bhejo", "send"]):
@@ -69,10 +70,7 @@ Tera kaam:
                 booking_confirmed = True
                 break
     
-    return jsonify({
-        "reply": ai_reply,
-        "booking_confirmed": booking_confirmed
-    })
+    return jsonify({"reply": ai_reply, "booking_confirmed": booking_confirmed})
 
 @app.route("/workers", methods=["GET"])
 def get_workers():
