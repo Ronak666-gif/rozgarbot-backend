@@ -1,36 +1,23 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from pymongo import MongoClient
-import google.generativeai as genai
+from google import genai
 from datetime import datetime
 import os
 
 app = Flask(__name__)
 CORS(app)
 
-# Config
-GEMINI_API_KEY = "AQ.Ab8RN6J_d_yWxzS2doSIsGL8NG86-HW1j1uq0FtwBffSt5Ljng"
-MONGO_URI = "mongodb+srv://farzi: j7DkNMtWJ6dirjiJ@cluster0.fmlsc9r.mongodb.net/?appName=Cluster0"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+MONGO_URI = os.environ.get("MONGO_URI")
 
-# MongoDB Connect
-client = MongoClient(MONGO_URI)
-db = client["rozgarbot"]
+client_mongo = MongoClient(MONGO_URI)
+db = client_mongo["rozgarbot"]
 workers_col = db["workers"]
 bookings_col = db["bookings"]
 reviews_col = db["reviews"]
 
-# Gemini Setup
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
-
-def find_workers(skill=None, area=None):
-    query = {"available": True}
-    if skill:
-        query["skill"] = {"$regex": skill, "$options": "i"}
-    if area:
-        query["area"] = {"$regex": area, "$options": "i"}
-    workers = list(workers_col.find(query, {"_id": 0}))
-    return workers
+client_gemini = genai.Client(api_key=GEMINI_API_KEY)
 
 def create_booking(worker_name, user_name, date, skill):
     booking = {
@@ -49,11 +36,9 @@ def chat():
     user_message = request.json.get("message", "")
     user_name = request.json.get("user_name", "User")
     
-    # Workers data fetch karo MongoDB se
     all_workers = list(workers_col.find({"available": True}, {"_id": 0}))
     workers_str = str(all_workers)
     
-    # Gemini ko prompt bhejo
     prompt = f"""
 Tu RozgarBot hai — ek AI agent jo India mein daily-wage workers (plumber, electrician, maid, driver, carpenter, cook) ko households se connect karta hai.
 
@@ -70,17 +55,16 @@ Tera kaam:
 4. Friendly Hinglish mein jawab do
 5. Worker ka naam, skill, area, price aur rating clearly batao
 6. Agar koi worker nahi mila to politely batao
-
-Jawab do:
 """
     
-    response = model.generate_content(prompt)
+    response = client_gemini.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt
+    )
     ai_reply = response.text
     
-    # Check karo booking hai kya message mein
     booking_confirmed = False
     if any(word in user_message.lower() for word in ["book", "confirm", "chahiye", "bhejo", "send"]):
-        # Simple booking create karo
         for worker in all_workers:
             if worker["skill"].lower() in user_message.lower() or worker["area"].lower() in user_message.lower():
                 create_booking(worker["name"], user_name, datetime.now().isoformat(), worker["skill"])
@@ -94,9 +78,7 @@ Jawab do:
 
 @app.route("/workers", methods=["GET"])
 def get_workers():
-    skill = request.args.get("skill")
-    area = request.args.get("area")
-    workers = find_workers(skill, area)
+    workers = list(workers_col.find({"available": True}, {"_id": 0}))
     return jsonify(workers)
 
 @app.route("/bookings", methods=["GET"])
