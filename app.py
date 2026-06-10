@@ -18,7 +18,7 @@ bookings_col = db["bookings"]
 reviews_col = db["reviews"]
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+model = genai.GenerativeModel("gemini-pro")
 
 def create_booking(worker_name, user_name, date, skill):
     booking = {
