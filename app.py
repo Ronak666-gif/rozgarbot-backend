@@ -20,16 +20,21 @@ bookings_col = db["bookings"]
 reviews_col = db["reviews"]
 
 def call_gemini(prompt):
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    response = http_requests.post(url, json=payload)
+    url = "https://freemodel.dev/v1/chat/completions"
+    headers = {
+        "Authorization": "Bearer fe_oa_a8c933b6689a9f89d1f9ff778d4a17e64c864a4ab502e54e",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "user", "content": prompt}]
+    }
+    response = http_requests.post(url, json=payload, headers=headers)
     data = response.json()
-    if "candidates" in data:
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-    elif "error" in data:
-        return f"API Error: {data['error']['message']}"
-    else:
-        return f"Unexpected response: {str(data)}"
+    try:
+        return data["choices"][0]["message"]["content"]
+    except:
+        return f"Error: {str(data)}"
 
 def create_booking(worker_name, user_name, date, skill):
     booking = {
