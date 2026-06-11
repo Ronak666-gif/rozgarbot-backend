@@ -25,7 +25,7 @@ reviews_col = db["reviews"]
 def call_ai(prompt):
     GROQ_KEY = os.environ.get("GROQ_API_KEY")
     if not GROQ_KEY:
-        return json.dumps({"reply": "GROQ_API_KEY missing hai server pe.", "workers": [], "quick_replies": [], "booking_card": None})
+        return json.dumps({"reply": "GROQ_API_KEY missing on server.", "workers": [], "quick_replies": [], "booking_card": None})
 
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -45,15 +45,15 @@ def call_ai(prompt):
 
         if "error" in data:
             err_msg = data["error"].get("message", "unknown error")
-            return json.dumps({"reply": "AI Error: " + err_msg, "workers": [], "quick_replies": ["Dobara try karo"], "booking_card": None})
+            return json.dumps({"reply": "AI Error: " + err_msg, "workers": [], "quick_replies": ["Try again"], "booking_card": None})
 
         if "choices" not in data or len(data["choices"]) == 0:
-            return json.dumps({"reply": "Koi response nahi mila.", "workers": [], "quick_replies": [], "booking_card": None})
+            return json.dumps({"reply": "No response received.", "workers": [], "quick_replies": [], "booking_card": None})
 
         return data["choices"][0]["message"]["content"]
 
     except Exception as e:
-        return json.dumps({"reply": "Connection error: " + str(e), "workers": [], "quick_replies": ["Dobara try karo"], "booking_card": None})
+        return json.dumps({"reply": "Connection error: " + str(e), "workers": [], "quick_replies": ["Try again"], "booking_card": None})
 
 
 # ─────────────────────────────────────────────
@@ -74,26 +74,28 @@ def extract_json_from_text(text):
 
 
 # ─────────────────────────────────────────────
-# SMART MATCH SCORE (0-100)
+# SMART MATCH SCORE (0-99)
 # ─────────────────────────────────────────────
 def calculate_match_score(worker, user_message):
-    score = 50  # base
+    score = 50
     msg = user_message.lower()
 
-    # Skill match
     if worker.get("skill", "").lower() in msg:
         score += 30
-
-    # Area match
     if worker.get("area", "").lower() in msg:
-        score += 15
-
-    # Rating boost
-    rating = float(worker.get("rating", 0))
-    if rating >= 4.5:
+        score += 10
+    if worker.get("city", "").lower() in msg:
         score += 5
-    elif rating >= 4.0:
+    if worker.get("country", "").lower() in msg:
         score += 3
+
+    rating = float(worker.get("rating", 0))
+    if rating >= 4.8:
+        score += 6
+    elif rating >= 4.5:
+        score += 4
+    elif rating >= 4.0:
+        score += 2
 
     return min(score, 99)
 
@@ -101,13 +103,17 @@ def calculate_match_score(worker, user_message):
 # ─────────────────────────────────────────────
 # BOOKING CREATOR
 # ─────────────────────────────────────────────
-def create_booking(worker_name, user_name, skill):
-    booking_id = "RB" + str(uuid.uuid4())[:8].upper()
+def create_booking(worker, user_name):
+    booking_id = "RB-" + str(uuid.uuid4())[:8].upper()
     booking = {
         "booking_id": booking_id,
-        "worker_name": worker_name,
+        "worker_name": worker.get("name"),
+        "worker_skill": worker.get("skill"),
+        "worker_area": worker.get("area"),
+        "worker_city": worker.get("city"),
+        "worker_country": worker.get("country"),
+        "worker_phone": worker.get("phone"),
         "user_name": user_name,
-        "skill": skill,
         "status": "confirmed",
         "created_at": datetime.now().isoformat()
     }
@@ -116,61 +122,345 @@ def create_booking(worker_name, user_name, skill):
 
 
 # ─────────────────────────────────────────────
-# SEED WORKERS (40+ workers across Jaipur)
+# SEED DATA — 200+ Workers, Global
 # ─────────────────────────────────────────────
-SEED_WORKERS = [
-    # Jhotwara
-    {"name": "Ramesh Kumar", "skill": "Plumber", "area": "Jhotwara", "price": 300, "rating": 4.5, "phone": "9876500001", "experience": "5 saal", "available": True},
-    {"name": "Suresh Meena", "skill": "Electrician", "area": "Jhotwara", "price": 350, "rating": 4.7, "phone": "9876500002", "experience": "7 saal", "available": True},
-    {"name": "Geeta Devi", "skill": "Maid", "area": "Jhotwara", "price": 200, "rating": 4.3, "phone": "9876500003", "experience": "3 saal", "available": True},
-    {"name": "Mohan Lal", "skill": "Carpenter", "area": "Jhotwara", "price": 400, "rating": 4.6, "phone": "9876500004", "experience": "10 saal", "available": True},
-    {"name": "Dinesh Driver", "skill": "Driver", "area": "Jhotwara", "price": 500, "rating": 4.4, "phone": "9876500005", "experience": "8 saal", "available": True},
-    {"name": "Kavita Sharma", "skill": "Cook", "area": "Jhotwara", "price": 250, "rating": 4.8, "phone": "9876500006", "experience": "6 saal", "available": True},
-    {"name": "Bhola Nath", "skill": "Painter", "area": "Jhotwara", "price": 450, "rating": 4.2, "phone": "9876500007", "experience": "4 saal", "available": True},
-    {"name": "Raju Mistri", "skill": "Mason", "area": "Jhotwara", "price": 600, "rating": 4.5, "phone": "9876500008", "experience": "12 saal", "available": True},
+def generate_workers():
+    workers = []
 
-    # Mansarovar
-    {"name": "Vijay Singh", "skill": "Plumber", "area": "Mansarovar", "price": 320, "rating": 4.6, "phone": "9876500009", "experience": "6 saal", "available": True},
-    {"name": "Anil Verma", "skill": "Electrician", "area": "Mansarovar", "price": 380, "rating": 4.5, "phone": "9876500010", "experience": "9 saal", "available": True},
-    {"name": "Sunita Bai", "skill": "Maid", "area": "Mansarovar", "price": 220, "rating": 4.4, "phone": "9876500011", "experience": "5 saal", "available": True},
-    {"name": "Harish Carpenter", "skill": "Carpenter", "area": "Mansarovar", "price": 420, "rating": 4.7, "phone": "9876500012", "experience": "8 saal", "available": True},
-    {"name": "Santosh Driver", "skill": "Driver", "area": "Mansarovar", "price": 550, "rating": 4.3, "phone": "9876500013", "experience": "5 saal", "available": True},
-    {"name": "Meena Cook", "skill": "Cook", "area": "Mansarovar", "price": 270, "rating": 4.9, "phone": "9876500014", "experience": "7 saal", "available": True},
-    {"name": "Pramod Painter", "skill": "Painter", "area": "Mansarovar", "price": 430, "rating": 4.1, "phone": "9876500015", "experience": "3 saal", "available": True},
-    {"name": "Kailash Nath", "skill": "AC Mechanic", "area": "Mansarovar", "price": 500, "rating": 4.6, "phone": "9876500016", "experience": "6 saal", "available": True},
+    # ── INDIA ──────────────────────────────────
 
-    # Vaishali Nagar
-    {"name": "Deepak Plumber", "skill": "Plumber", "area": "Vaishali Nagar", "price": 350, "rating": 4.7, "phone": "9876500017", "experience": "8 saal", "available": True},
-    {"name": "Rakesh Electric", "skill": "Electrician", "area": "Vaishali Nagar", "price": 400, "rating": 4.8, "phone": "9876500018", "experience": "11 saal", "available": True},
-    {"name": "Pushpa Devi", "skill": "Maid", "area": "Vaishali Nagar", "price": 240, "rating": 4.5, "phone": "9876500019", "experience": "4 saal", "available": True},
-    {"name": "Nand Kishore", "skill": "Carpenter", "area": "Vaishali Nagar", "price": 450, "rating": 4.4, "phone": "9876500020", "experience": "9 saal", "available": True},
-    {"name": "Ghanshyam Driver", "skill": "Driver", "area": "Vaishali Nagar", "price": 600, "rating": 4.6, "phone": "9876500021", "experience": "10 saal", "available": True},
-    {"name": "Sushila Cook", "skill": "Cook", "area": "Vaishali Nagar", "price": 300, "rating": 4.7, "phone": "9876500022", "experience": "8 saal", "available": True},
-    {"name": "Mahesh Painter", "skill": "Painter", "area": "Vaishali Nagar", "price": 480, "rating": 4.3, "phone": "9876500023", "experience": "5 saal", "available": True},
-    {"name": "Sunil AC", "skill": "AC Mechanic", "area": "Vaishali Nagar", "price": 550, "rating": 4.8, "phone": "9876500024", "experience": "7 saal", "available": True},
+    # Jaipur, Rajasthan
+    jaipur_workers = [
+        ("Ramesh Kumar", "Plumber", "Jhotwara", 300, 4.5, "9876500001", "5 years"),
+        ("Suresh Meena", "Electrician", "Jhotwara", 350, 4.7, "9876500002", "7 years"),
+        ("Geeta Devi", "Maid", "Jhotwara", 200, 4.3, "9876500003", "3 years"),
+        ("Mohan Lal", "Carpenter", "Jhotwara", 400, 4.6, "9876500004", "10 years"),
+        ("Dinesh Saini", "Driver", "Jhotwara", 500, 4.4, "9876500005", "8 years"),
+        ("Kavita Sharma", "Cook", "Jhotwara", 250, 4.8, "9876500006", "6 years"),
+        ("Bhola Nath", "Painter", "Jhotwara", 450, 4.2, "9876500007", "4 years"),
+        ("Raju Mistri", "Mason", "Jhotwara", 600, 4.5, "9876500008", "12 years"),
+        ("Vijay Singh", "Plumber", "Mansarovar", 320, 4.6, "9876500009", "6 years"),
+        ("Anil Verma", "Electrician", "Mansarovar", 380, 4.5, "9876500010", "9 years"),
+        ("Sunita Bai", "Maid", "Mansarovar", 220, 4.4, "9876500011", "5 years"),
+        ("Harish Sharma", "Carpenter", "Mansarovar", 420, 4.7, "9876500012", "8 years"),
+        ("Santosh Driver", "Driver", "Mansarovar", 550, 4.3, "9876500013", "5 years"),
+        ("Meena Devi", "Cook", "Mansarovar", 270, 4.9, "9876500014", "7 years"),
+        ("Kailash Nath", "AC Mechanic", "Mansarovar", 500, 4.6, "9876500016", "6 years"),
+        ("Deepak Sharma", "Plumber", "Vaishali Nagar", 350, 4.7, "9876500017", "8 years"),
+        ("Rakesh Verma", "Electrician", "Vaishali Nagar", 400, 4.8, "9876500018", "11 years"),
+        ("Pushpa Devi", "Maid", "Vaishali Nagar", 240, 4.5, "9876500019", "4 years"),
+        ("Nand Kishore", "Carpenter", "Vaishali Nagar", 450, 4.4, "9876500020", "9 years"),
+        ("Ghanshyam Das", "Driver", "Vaishali Nagar", 600, 4.6, "9876500021", "10 years"),
+        ("Sunil Kumar", "AC Mechanic", "Vaishali Nagar", 550, 4.8, "9876500024", "7 years"),
+        ("Prakash Mali", "Gardener", "Malviya Nagar", 280, 4.5, "9876500025", "5 years"),
+        ("Umesh Gupta", "Electrician", "Malviya Nagar", 370, 4.6, "9876500026", "8 years"),
+        ("Laxmi Bai", "Maid", "Malviya Nagar", 230, 4.2, "9876500027", "3 years"),
+        ("Gopal Sharma", "Carpenter", "Malviya Nagar", 410, 4.5, "9876500028", "7 years"),
+        ("Manoj Kumar", "Plumber", "Sanganer", 290, 4.3, "9876500031", "4 years"),
+        ("Shyam Lal", "Driver", "Sanganer", 480, 4.4, "9876500034", "7 years"),
+        ("Lalit Sharma", "Plumber", "Jagatpura", 310, 4.4, "9876500036", "5 years"),
+        ("Bharat Singh", "Electrician", "Jagatpura", 360, 4.7, "9876500037", "9 years"),
+        ("Jitendra Kumar", "AC Mechanic", "Jagatpura", 520, 4.5, "9876500040", "6 years"),
+        ("Priya Kumari", "Babysitter", "Vaishali Nagar", 300, 4.6, "9876500041", "3 years"),
+        ("Rajesh Tailor", "Tailor", "Jhotwara", 350, 4.4, "9876500042", "8 years"),
+        ("Mukesh Sharma", "Pest Control", "Mansarovar", 600, 4.7, "9876500043", "6 years"),
+        ("Sanjay Gupta", "CCTV Technician", "Vaishali Nagar", 700, 4.5, "9876500044", "5 years"),
+        ("Arjun Meena", "Solar Technician", "Malviya Nagar", 800, 4.8, "9876500045", "4 years"),
+    ]
+    for w in jaipur_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Jaipur", "state": "Rajasthan", "country": "India", "price": w[3], "price_currency": "INR", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
 
-    # Malviya Nagar
-    {"name": "Prakash Plumber", "skill": "Plumber", "area": "Malviya Nagar", "price": 330, "rating": 4.4, "phone": "9876500025", "experience": "5 saal", "available": True},
-    {"name": "Umesh Electric", "skill": "Electrician", "area": "Malviya Nagar", "price": 370, "rating": 4.6, "phone": "9876500026", "experience": "8 saal", "available": True},
-    {"name": "Laxmi Bai", "skill": "Maid", "area": "Malviya Nagar", "price": 230, "rating": 4.2, "phone": "9876500027", "experience": "3 saal", "available": True},
-    {"name": "Gopal Carpenter", "skill": "Carpenter", "area": "Malviya Nagar", "price": 410, "rating": 4.5, "phone": "9876500028", "experience": "7 saal", "available": True},
-    {"name": "Ramji Cook", "skill": "Cook", "area": "Malviya Nagar", "price": 260, "rating": 4.6, "phone": "9876500029", "experience": "6 saal", "available": True},
-    {"name": "Babu Painter", "skill": "Painter", "area": "Malviya Nagar", "price": 440, "rating": 4.4, "phone": "9876500030", "experience": "4 saal", "available": True},
+    # Delhi
+    delhi_workers = [
+        ("Amit Sharma", "Plumber", "Dwarka", 400, 4.6, "9811000001", "6 years"),
+        ("Rohit Verma", "Electrician", "Saket", 450, 4.8, "9811000002", "10 years"),
+        ("Seema Devi", "Maid", "Lajpat Nagar", 300, 4.4, "9811000003", "5 years"),
+        ("Vinod Kumar", "Driver", "Rohini", 700, 4.5, "9811000004", "12 years"),
+        ("Sunita Rani", "Cook", "Karol Bagh", 350, 4.7, "9811000005", "7 years"),
+        ("Ravi Sharma", "Carpenter", "Janakpuri", 550, 4.6, "9811000006", "9 years"),
+        ("Pooja Devi", "Babysitter", "Vasant Kunj", 400, 4.9, "9811000007", "4 years"),
+        ("Naresh Kumar", "AC Mechanic", "Pitampura", 650, 4.7, "9811000008", "8 years"),
+        ("Deepak Singh", "Security Guard", "Noida Sector 18", 600, 4.3, "9811000009", "6 years"),
+        ("Anita Sharma", "Caretaker/Nurse", "South Extension", 500, 4.8, "9811000010", "5 years"),
+        ("Suresh Pal", "Painter", "Uttam Nagar", 500, 4.4, "9811000011", "6 years"),
+        ("Harendra Singh", "Mason", "Shahdara", 700, 4.5, "9811000012", "15 years"),
+        ("Meena Kumari", "Washer/Laundry", "Mayur Vihar", 250, 4.2, "9811000013", "4 years"),
+        ("Pankaj Kumar", "Gardener", "Greater Kailash", 350, 4.6, "9811000014", "5 years"),
+        ("Vikram Singh", "Welder", "Wazirpur", 600, 4.5, "9811000015", "10 years"),
+    ]
+    for w in delhi_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Delhi", "state": "Delhi", "country": "India", "price": w[3], "price_currency": "INR", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
 
-    # Sanganer
-    {"name": "Manoj Plumber", "skill": "Plumber", "area": "Sanganer", "price": 290, "rating": 4.3, "phone": "9876500031", "experience": "4 saal", "available": True},
-    {"name": "Pappu Electric", "skill": "Electrician", "area": "Sanganer", "price": 340, "rating": 4.5, "phone": "9876500032", "experience": "6 saal", "available": True},
-    {"name": "Champa Devi", "skill": "Maid", "area": "Sanganer", "price": 190, "rating": 4.1, "phone": "9876500033", "experience": "2 saal", "available": True},
-    {"name": "Shyam Driver", "skill": "Driver", "area": "Sanganer", "price": 480, "rating": 4.4, "phone": "9876500034", "experience": "7 saal", "available": True},
-    {"name": "Heera Cook", "skill": "Cook", "area": "Sanganer", "price": 240, "rating": 4.5, "phone": "9876500035", "experience": "5 saal", "available": True},
+    # Mumbai
+    mumbai_workers = [
+        ("Santosh Patil", "Plumber", "Andheri", 500, 4.7, "9922000001", "8 years"),
+        ("Pradeep Sawant", "Electrician", "Bandra", 550, 4.8, "9922000002", "11 years"),
+        ("Rekha Nair", "Maid", "Powai", 400, 4.5, "9922000003", "6 years"),
+        ("Ramesh Jadhav", "Driver", "Thane", 800, 4.6, "9922000004", "14 years"),
+        ("Lata Pawar", "Cook", "Borivali", 450, 4.9, "9922000005", "8 years"),
+        ("Ganesh More", "Carpenter", "Kurla", 650, 4.5, "9922000006", "10 years"),
+        ("Surekha Desai", "Caretaker/Nurse", "Juhu", 600, 4.8, "9922000007", "7 years"),
+        ("Arun Bhosale", "AC Mechanic", "Malad", 750, 4.6, "9922000008", "9 years"),
+        ("Sushma Yadav", "Babysitter", "Chembur", 500, 4.7, "9922000009", "5 years"),
+        ("Prakash Kamble", "Security Guard", "Navi Mumbai", 700, 4.4, "9922000010", "8 years"),
+        ("Vijay Shinde", "Painter", "Dadar", 600, 4.3, "9922000011", "7 years"),
+        ("Sunil Gaikwad", "Pest Control", "Kalyan", 800, 4.6, "9922000012", "6 years"),
+        ("Mohan Tiwari", "Tailor", "Dharavi", 400, 4.5, "9922000013", "12 years"),
+        ("Kavita Rane", "Tutor", "Mulund", 700, 4.9, "9922000014", "5 years"),
+    ]
+    for w in mumbai_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Mumbai", "state": "Maharashtra", "country": "India", "price": w[3], "price_currency": "INR", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
 
-    # Jagatpura
-    {"name": "Lalit Plumber", "skill": "Plumber", "area": "Jagatpura", "price": 310, "rating": 4.4, "phone": "9876500036", "experience": "5 saal", "available": True},
-    {"name": "Bharat Electric", "skill": "Electrician", "area": "Jagatpura", "price": 360, "rating": 4.7, "phone": "9876500037", "experience": "9 saal", "available": True},
-    {"name": "Sarla Maid", "skill": "Maid", "area": "Jagatpura", "price": 210, "rating": 4.3, "phone": "9876500038", "experience": "3 saal", "available": True},
-    {"name": "Naresh Carpenter", "skill": "Carpenter", "area": "Jagatpura", "price": 430, "rating": 4.6, "phone": "9876500039", "experience": "8 saal", "available": True},
-    {"name": "Jitendra AC", "skill": "AC Mechanic", "area": "Jagatpura", "price": 520, "rating": 4.5, "phone": "9876500040", "experience": "6 saal", "available": True},
-]
+    # Bangalore
+    bangalore_workers = [
+        ("Suresh Reddy", "Plumber", "Koramangala", 450, 4.6, "9845000001", "7 years"),
+        ("Ravi Kumar", "Electrician", "Whitefield", 500, 4.8, "9845000002", "10 years"),
+        ("Lakshmi Devi", "Maid", "Indiranagar", 350, 4.5, "9845000003", "5 years"),
+        ("Manjunath S", "Driver", "HSR Layout", 750, 4.7, "9845000004", "11 years"),
+        ("Geetha Rao", "Cook", "Jayanagar", 400, 4.9, "9845000005", "8 years"),
+        ("Venkatesh B", "Carpenter", "BTM Layout", 600, 4.6, "9845000006", "9 years"),
+        ("Priya Nair", "Babysitter", "Marathahalli", 450, 4.8, "9845000007", "4 years"),
+        ("Kiran Kumar", "AC Mechanic", "Electronic City", 700, 4.7, "9845000008", "8 years"),
+        ("Ramesh Gowda", "Gardener", "Sadashivanagar", 350, 4.5, "9845000009", "6 years"),
+        ("Anand Raj", "CCTV Technician", "Bannerghatta Road", 800, 4.6, "9845000010", "5 years"),
+        ("Shobha Kumari", "Caretaker/Nurse", "JP Nagar", 550, 4.8, "9845000011", "7 years"),
+        ("Nagesh Rao", "Solar Technician", "Yelahanka", 900, 4.7, "9845000012", "4 years"),
+    ]
+    for w in bangalore_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Bangalore", "state": "Karnataka", "country": "India", "price": w[3], "price_currency": "INR", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # Chennai
+    chennai_workers = [
+        ("Murugan K", "Plumber", "Anna Nagar", 400, 4.5, "9444000001", "6 years"),
+        ("Selvam R", "Electrician", "T Nagar", 450, 4.7, "9444000002", "9 years"),
+        ("Meenakshi S", "Maid", "Adyar", 300, 4.4, "9444000003", "4 years"),
+        ("Rajan P", "Driver", "Velachery", 700, 4.6, "9444000004", "13 years"),
+        ("Saranya D", "Cook", "Guindy", 380, 4.8, "9444000005", "7 years"),
+        ("Kannan V", "Mason", "Tambaram", 650, 4.5, "9444000006", "11 years"),
+        ("Priya M", "Tutor", "Nungambakkam", 600, 4.9, "9444000007", "5 years"),
+        ("Arumugam T", "Welder", "Ambattur", 550, 4.4, "9444000008", "8 years"),
+    ]
+    for w in chennai_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Chennai", "state": "Tamil Nadu", "country": "India", "price": w[3], "price_currency": "INR", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # Hyderabad
+    hyderabad_workers = [
+        ("Venkat Rao", "Plumber", "Hitech City", 420, 4.6, "9848000001", "7 years"),
+        ("Srikanth M", "Electrician", "Gachibowli", 480, 4.8, "9848000002", "10 years"),
+        ("Padmavathi D", "Maid", "Jubilee Hills", 320, 4.5, "9848000003", "5 years"),
+        ("Ramu K", "Driver", "Secunderabad", 720, 4.5, "9848000004", "12 years"),
+        ("Lakshmi B", "Cook", "Begumpet", 400, 4.7, "9848000005", "8 years"),
+        ("Suresh Naidu", "AC Mechanic", "LB Nagar", 680, 4.6, "9848000006", "7 years"),
+        ("Anitha Reddy", "Caretaker/Nurse", "Banjara Hills", 580, 4.9, "9848000007", "6 years"),
+        ("Mahesh T", "Pest Control", "Miyapur", 750, 4.5, "9848000008", "5 years"),
+    ]
+    for w in hyderabad_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Hyderabad", "state": "Telangana", "country": "India", "price": w[3], "price_currency": "INR", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # Pune
+    pune_workers = [
+        ("Sandip Jagtap", "Plumber", "Kothrud", 380, 4.5, "9823000001", "6 years"),
+        ("Nilesh Mane", "Electrician", "Viman Nagar", 430, 4.7, "9823000002", "8 years"),
+        ("Sunanda Kulkarni", "Maid", "Aundh", 280, 4.4, "9823000003", "4 years"),
+        ("Sachin Pawar", "Driver", "Hinjewadi", 680, 4.6, "9823000004", "10 years"),
+        ("Archana Bhosle", "Cook", "Shivajinagar", 380, 4.8, "9823000005", "7 years"),
+        ("Rahul Deshmukh", "Gym Trainer", "Baner", 700, 4.9, "9823000006", "5 years"),
+        ("Priti Shelar", "Babysitter", "Wakad", 420, 4.7, "9823000007", "3 years"),
+    ]
+    for w in pune_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Pune", "state": "Maharashtra", "country": "India", "price": w[3], "price_currency": "INR", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # Kolkata
+    kolkata_workers = [
+        ("Subhash Das", "Plumber", "Salt Lake", 350, 4.4, "9831000001", "5 years"),
+        ("Tapas Ghosh", "Electrician", "Park Street", 400, 4.6, "9831000002", "8 years"),
+        ("Mamata Roy", "Maid", "Ballygunge", 250, 4.3, "9831000003", "4 years"),
+        ("Ratan Mondal", "Driver", "Howrah", 650, 4.5, "9831000004", "11 years"),
+        ("Chhaya Biswas", "Cook", "New Town", 350, 4.7, "9831000005", "7 years"),
+        ("Kartik Pal", "Mason", "Dum Dum", 600, 4.4, "9831000006", "10 years"),
+        ("Ananya Sen", "Tutor", "Jadavpur", 550, 4.9, "9831000007", "5 years"),
+    ]
+    for w in kolkata_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Kolkata", "state": "West Bengal", "country": "India", "price": w[3], "price_currency": "INR", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # Ahmedabad
+    ahmedabad_workers = [
+        ("Bhavesh Patel", "Plumber", "Satellite", 360, 4.5, "9979000001", "6 years"),
+        ("Jignesh Shah", "Electrician", "Navrangpura", 410, 4.7, "9979000002", "9 years"),
+        ("Hetal Parmar", "Maid", "Vastrapur", 270, 4.4, "9979000003", "4 years"),
+        ("Kiran Desai", "Driver", "Bopal", 640, 4.5, "9979000004", "10 years"),
+        ("Sonal Mehta", "Cook", "Prahlad Nagar", 370, 4.8, "9979000005", "7 years"),
+        ("Deepak Thakkar", "AC Mechanic", "Gota", 620, 4.6, "9979000006", "6 years"),
+    ]
+    for w in ahmedabad_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Ahmedabad", "state": "Gujarat", "country": "India", "price": w[3], "price_currency": "INR", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # ── UAE ────────────────────────────────────
+
+    dubai_workers = [
+        ("Mohammed Al Rashid", "Plumber", "Dubai Marina", 150, 4.7, "+97150000001", "8 years"),
+        ("Rajan Thomas", "Electrician", "Jumeirah", 180, 4.8, "+97150000002", "12 years"),
+        ("Sanjay Pillai", "Driver", "Downtown Dubai", 200, 4.9, "+97150000003", "10 years"),
+        ("Maria Santos", "Maid", "Palm Jumeirah", 120, 4.6, "+97150000004", "6 years"),
+        ("Priya Krishnan", "Cook", "Business Bay", 160, 4.8, "+97150000005", "8 years"),
+        ("Ahmed Hassan", "AC Mechanic", "Deira", 200, 4.7, "+97150000006", "9 years"),
+        ("Filippo Reyes", "Babysitter", "JBR", 140, 4.9, "+97150000007", "5 years"),
+        ("Sunil Mathew", "Carpenter", "Al Barsha", 170, 4.6, "+97150000008", "11 years"),
+        ("Rajesh Nambiar", "Security Guard", "DIFC", 160, 4.5, "+97150000009", "7 years"),
+        ("Lakshmi Iyer", "Caretaker/Nurse", "Mirdif", 180, 4.9, "+97150000010", "8 years"),
+    ]
+    for w in dubai_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Dubai", "state": "Dubai", "country": "UAE", "price": w[3], "price_currency": "AED", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    abudhabi_workers = [
+        ("Khalid Al Mansoori", "Plumber", "Corniche", 160, 4.6, "+97155000001", "7 years"),
+        ("Binoy George", "Electrician", "Al Reem Island", 190, 4.8, "+97155000002", "11 years"),
+        ("Anoop Menon", "Driver", "Yas Island", 210, 4.7, "+97155000003", "9 years"),
+        ("Joanna Cruz", "Maid", "Khalidiyah", 130, 4.5, "+97155000004", "5 years"),
+        ("Sunitha Nair", "Cook", "Al Mushrif", 170, 4.8, "+97155000005", "7 years"),
+    ]
+    for w in abudhabi_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Abu Dhabi", "state": "Abu Dhabi", "country": "UAE", "price": w[3], "price_currency": "AED", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # ── UK ─────────────────────────────────────
+
+    london_workers = [
+        ("James O'Brien", "Plumber", "Shoreditch", 80, 4.7, "+44790000001", "10 years"),
+        ("David Patel", "Electrician", "Canary Wharf", 90, 4.8, "+44790000002", "12 years"),
+        ("Maria Garcia", "Maid", "Chelsea", 60, 4.6, "+44790000003", "6 years"),
+        ("Rajesh Sharma", "Driver", "Heathrow", 100, 4.9, "+44790000004", "15 years"),
+        ("Priya Singh", "Cook", "Southall", 75, 4.8, "+44790000005", "8 years"),
+        ("Michael Brown", "Carpenter", "Hackney", 95, 4.6, "+44790000006", "11 years"),
+        ("Sophie Williams", "Babysitter", "Kensington", 65, 4.9, "+44790000007", "4 years"),
+        ("Arjun Mehta", "AC Mechanic", "Croydon", 85, 4.7, "+44790000008", "8 years"),
+        ("Emma Johnson", "Caretaker/Nurse", "Wimbledon", 80, 4.9, "+44790000009", "9 years"),
+        ("Tom Wilson", "Gardener", "Richmond", 70, 4.6, "+44790000010", "7 years"),
+        ("Anita Kapoor", "Tutor", "Wembley", 90, 4.9, "+44790000011", "6 years"),
+    ]
+    for w in london_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "London", "state": "England", "country": "UK", "price": w[3], "price_currency": "GBP", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # ── SINGAPORE ──────────────────────────────
+
+    singapore_workers = [
+        ("Wei Ming Tan", "Plumber", "Orchard", 120, 4.7, "+6591000001", "8 years"),
+        ("Kumar Selvam", "Electrician", "Jurong East", 140, 4.8, "+6591000002", "10 years"),
+        ("Maria dela Cruz", "Maid", "Buona Vista", 80, 4.6, "+6591000003", "5 years"),
+        ("Raj Chandran", "Driver", "Tampines", 160, 4.8, "+6591000004", "12 years"),
+        ("Siti Rahmah", "Cook", "Toa Payoh", 110, 4.9, "+6591000005", "7 years"),
+        ("John Lim", "Carpenter", "Woodlands", 130, 4.6, "+6591000006", "9 years"),
+        ("Priya Nair", "Babysitter", "Holland Village", 100, 4.8, "+6591000007", "4 years"),
+        ("Ahmad Fauzi", "AC Mechanic", "Bedok", 150, 4.7, "+6591000008", "8 years"),
+        ("Grace Tan", "Caretaker/Nurse", "Clementi", 130, 4.9, "+6591000009", "7 years"),
+        ("Ravi Subramaniam", "Security Guard", "Changi", 140, 4.5, "+6591000010", "10 years"),
+    ]
+    for w in singapore_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Singapore", "state": "Singapore", "country": "Singapore", "price": w[3], "price_currency": "SGD", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # ── USA ─────────────────────────────────────
+
+    newyork_workers = [
+        ("Carlos Mendez", "Plumber", "Brooklyn", 120, 4.6, "+12120000001", "9 years"),
+        ("Robert Johnson", "Electrician", "Manhattan", 140, 4.8, "+12120000002", "13 years"),
+        ("Ana Ramirez", "Maid", "Queens", 80, 4.5, "+12120000003", "5 years"),
+        ("James Williams", "Driver", "Bronx", 130, 4.7, "+12120000004", "11 years"),
+        ("Priya Patel", "Cook", "Jackson Heights", 100, 4.9, "+12120000005", "8 years"),
+        ("David Chen", "Carpenter", "Staten Island", 150, 4.6, "+12120000006", "10 years"),
+        ("Sofia Rodriguez", "Babysitter", "Upper East Side", 110, 4.9, "+12120000007", "4 years"),
+        ("Michael Davis", "Gardener", "Long Island City", 95, 4.5, "+12120000008", "7 years"),
+    ]
+    for w in newyork_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "New York", "state": "New York", "country": "USA", "price": w[3], "price_currency": "USD", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    sf_workers = [
+        ("Miguel Torres", "Plumber", "Mission District", 130, 4.7, "+14150000001", "8 years"),
+        ("Kevin Zhang", "Electrician", "SoMa", 155, 4.8, "+14150000002", "11 years"),
+        ("Gabriela Flores", "Maid", "Sunset District", 90, 4.6, "+14150000003", "5 years"),
+        ("Rajiv Nair", "Driver", "Financial District", 140, 4.8, "+14150000004", "10 years"),
+        ("Amy Nguyen", "Cook", "Richmond District", 110, 4.9, "+14150000005", "7 years"),
+        ("Jake Miller", "Gym Trainer", "Castro", 160, 4.9, "+14150000006", "5 years"),
+        ("Lisa Park", "Dog Walker", "Noe Valley", 80, 4.8, "+14150000007", "3 years"),
+    ]
+    for w in sf_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "San Francisco", "state": "California", "country": "USA", "price": w[3], "price_currency": "USD", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # ── CANADA ─────────────────────────────────
+
+    toronto_workers = [
+        ("Harpreet Singh", "Plumber", "Brampton", 110, 4.6, "+14160000001", "8 years"),
+        ("Navdeep Kaur", "Maid", "Scarborough", 75, 4.5, "+14160000002", "5 years"),
+        ("Gurpreet Dhaliwal", "Driver", "Mississauga", 120, 4.7, "+14160000003", "10 years"),
+        ("Aisha Khan", "Cook", "North York", 95, 4.8, "+14160000004", "7 years"),
+        ("Patrick O'Neill", "Electrician", "Downtown Toronto", 130, 4.8, "+14160000005", "11 years"),
+        ("Sarah Thompson", "Caretaker/Nurse", "Etobicoke", 110, 4.9, "+14160000006", "8 years"),
+    ]
+    for w in toronto_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Toronto", "state": "Ontario", "country": "Canada", "price": w[3], "price_currency": "CAD", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # ── AUSTRALIA ──────────────────────────────
+
+    sydney_workers = [
+        ("Liam O'Connor", "Plumber", "Bondi", 130, 4.7, "+61400000001", "9 years"),
+        ("Priya Sharma", "Maid", "Parramatta", 85, 4.5, "+61400000002", "5 years"),
+        ("Raj Patel", "Electrician", "Chatswood", 150, 4.8, "+61400000003", "12 years"),
+        ("Emma Wilson", "Babysitter", "Manly", 95, 4.9, "+61400000004", "4 years"),
+        ("Wei Chen", "Gardener", "Ryde", 100, 4.6, "+61400000005", "6 years"),
+        ("Mohammed Ali", "Driver", "Liverpool", 120, 4.7, "+61400000006", "10 years"),
+    ]
+    for w in sydney_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Sydney", "state": "New South Wales", "country": "Australia", "price": w[3], "price_currency": "AUD", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # ── GERMANY ────────────────────────────────
+
+    berlin_workers = [
+        ("Klaus Mueller", "Plumber", "Mitte", 90, 4.7, "+49301000001", "10 years"),
+        ("Hans Weber", "Electrician", "Prenzlauer Berg", 100, 4.8, "+49301000002", "13 years"),
+        ("Anna Schmidt", "Maid", "Charlottenburg", 70, 4.6, "+49301000003", "6 years"),
+        ("Mehmet Yilmaz", "Carpenter", "Kreuzberg", 95, 4.5, "+49301000004", "9 years"),
+        ("Fatima Al-Hassan", "Cook", "Neukolln", 80, 4.8, "+49301000005", "7 years"),
+        ("Thomas Fischer", "Gardener", "Steglitz", 75, 4.6, "+49301000006", "8 years"),
+    ]
+    for w in berlin_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Berlin", "state": "Berlin", "country": "Germany", "price": w[3], "price_currency": "EUR", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # ── JAPAN ──────────────────────────────────
+
+    tokyo_workers = [
+        ("Tanaka Hiroshi", "Plumber", "Shinjuku", 8000, 4.8, "+81901000001", "10 years"),
+        ("Yamamoto Kenji", "Electrician", "Shibuya", 9000, 4.9, "+81901000002", "12 years"),
+        ("Sato Yuki", "Maid", "Minato", 6500, 4.7, "+81901000003", "5 years"),
+        ("Nakamura Taro", "Carpenter", "Asakusa", 8500, 4.7, "+81901000004", "9 years"),
+        ("Suzuki Akiko", "Caretaker/Nurse", "Setagaya", 9000, 4.9, "+81901000005", "8 years"),
+        ("Kobayashi Ryo", "Gardener", "Meguro", 7000, 4.6, "+81901000006", "7 years"),
+    ]
+    for w in tokyo_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Tokyo", "state": "Tokyo", "country": "Japan", "price": w[3], "price_currency": "JPY", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # ── SOUTH AFRICA ───────────────────────────
+
+    joburg_workers = [
+        ("Sipho Dlamini", "Plumber", "Sandton", 800, 4.6, "+27821000001", "7 years"),
+        ("Thabo Mokoena", "Electrician", "Soweto", 900, 4.7, "+27821000002", "10 years"),
+        ("Nomsa Zulu", "Maid", "Rosebank", 600, 4.5, "+27821000003", "5 years"),
+        ("Bongani Nkosi", "Driver", "Midrand", 1000, 4.8, "+27821000004", "12 years"),
+        ("Lerato Khumalo", "Cook", "Melville", 750, 4.8, "+27821000005", "7 years"),
+    ]
+    for w in joburg_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Johannesburg", "state": "Gauteng", "country": "South Africa", "price": w[3], "price_currency": "ZAR", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    # ── BRAZIL ─────────────────────────────────
+
+    saopaulo_workers = [
+        ("Carlos Silva", "Plumber", "Jardins", 150, 4.5, "+55111000001", "7 years"),
+        ("Ana Costa", "Maid", "Moema", 100, 4.4, "+55111000002", "5 years"),
+        ("Roberto Santos", "Electrician", "Vila Madalena", 170, 4.7, "+55111000003", "9 years"),
+        ("Maria Oliveira", "Cook", "Pinheiros", 130, 4.8, "+55111000004", "7 years"),
+        ("Paulo Ferreira", "Driver", "Santo Andre", 160, 4.6, "+55111000005", "11 years"),
+    ]
+    for w in saopaulo_workers:
+        workers.append({"name": w[0], "skill": w[1], "area": w[2], "city": "Sao Paulo", "state": "Sao Paulo", "country": "Brazil", "price": w[3], "price_currency": "BRL", "rating": w[4], "phone": w[5], "experience": w[6], "available": True, "verified": True})
+
+    return workers
 
 
 # ─────────────────────────────────────────────
@@ -179,22 +469,21 @@ SEED_WORKERS = [
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"status": "RozgarBot API is running!", "version": "5.0"})
+    return jsonify({"status": "RozgarBot API is running!", "version": "6.0", "workers_global": True})
 
 
 @app.route("/ping", methods=["GET"])
 def ping():
-    """Keep-alive endpoint to prevent Render cold start"""
     return jsonify({"status": "alive", "time": datetime.now().isoformat()})
 
 
 @app.route("/seed-workers", methods=["POST"])
 def seed_workers():
-    """Seed 40+ workers into MongoDB — call once"""
     try:
+        workers = generate_workers()
         workers_col.delete_many({})
-        workers_col.insert_many(SEED_WORKERS)
-        return jsonify({"message": f"{len(SEED_WORKERS)} workers seeded successfully!"})
+        workers_col.insert_many(workers)
+        return jsonify({"message": f"{len(workers)} workers seeded successfully across multiple countries!"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -204,27 +493,22 @@ def chat():
     try:
         body = request.get_json(force=True)
         user_message = body.get("message", "").strip()
-        user_name = body.get("user_name", "").strip()
+        user_name = body.get("user_name", "").strip() or "there"
 
-        # Fallback if name empty
-        if not user_name:
-            user_name = "Dost"
-
-        # Input validation
         if not user_message:
             return jsonify({
-                "reply": "Kuch toh bolo! Kya chahiye aapko?",
+                "reply": f"Hi {user_name}! How can I help you today? Tell me what kind of worker you need and your location.",
                 "workers": [],
-                "quick_replies": ["Plumber dhundho", "Electrician chahiye", "Maid book karo", "Driver bulao"],
+                "quick_replies": ["Find a Plumber", "Need an Electrician", "Book a Maid", "Hire a Driver"],
                 "booking_card": None,
                 "booking_confirmed": False
             })
 
-        if len(user_message) < 2 or not re.search(r'[a-zA-Z\u0900-\u097F]', user_message):
+        if len(user_message) < 2 or not re.search(r'[a-zA-Z]', user_message):
             return jsonify({
-                "reply": f"{user_name}, please clearly batao — kaunsa kaam chahiye aur kaunse area mein?",
+                "reply": f"Hi {user_name}! Please describe what service you need and your location (e.g. 'I need a plumber in Dubai').",
                 "workers": [],
-                "quick_replies": ["Plumber dhundho", "Electrician chahiye", "Maid book karo", "Driver bulao"],
+                "quick_replies": ["Find a Plumber", "Need an Electrician", "Book a Maid", "Hire a Driver"],
                 "booking_card": None,
                 "booking_confirmed": False
             })
@@ -233,19 +517,20 @@ def chat():
         workers_str = json.dumps(all_workers, ensure_ascii=False)
 
         prompt = (
-            "Tu RozgarBot hai — India mein daily-wage workers ko households se connect karne wala AI agent.\n\n"
+            "You are RozgarBot — a global AI-powered platform connecting daily-wage workers with households and businesses worldwide.\n\n"
             "Available Workers Database:\n" + workers_str + "\n\n"
-            "User ka naam: " + user_name + "\n"
-            "User ka message: \"" + user_message + "\"\n\n"
-            "RULES:\n"
-            "1. User ko HAMESHA \"" + user_name + "\" naam se address karo — kabhi 'Guest' ya 'User' mat bolna\n"
-            "2. Agar user saare/multiple workers maange ya koi specific skill maange toh SAARE matching workers return karo\n"
-            "3. Hinglish mein jawab do — friendly aur helpful tone rakho\n"
-            "4. Agar koi bhi worker match nahi karta toh workers = [] return karo aur suggest karo ki kya search karein\n"
-            "5. STRICTLY sirf valid JSON return karo, koi extra text nahi\n\n"
-            "EXACT JSON FORMAT (koi bhi field miss mat karo):\n"
-            "{\"reply\": \"message here\", \"workers\": [{\"name\": \"\", \"skill\": \"\", \"area\": \"\", \"price\": 0, \"rating\": 0.0, \"phone\": \"\", \"experience\": \"\"}], \"quick_replies\": [\"btn1\", \"btn2\", \"btn3\"], \"booking_card\": null}\n\n"
-            "workers = [] agar koi match nahi. booking_card = null always (backend handle karega)."
+            "User's name: " + user_name + "\n"
+            "User's message: \"" + user_message + "\"\n\n"
+            "STRICT RULES:\n"
+            "1. ALWAYS address the user as \"" + user_name + "\" — NEVER call them 'Guest' or 'User'\n"
+            "2. If user asks for multiple workers or a skill, return ALL matching workers\n"
+            "3. Reply ONLY in English — professional, friendly tone\n"
+            "4. Match workers by skill, city, area, country based on user's message\n"
+            "5. If no workers match, reply helpfully suggesting alternatives\n"
+            "6. Return STRICTLY valid JSON only — no extra text, no markdown\n\n"
+            "EXACT JSON FORMAT:\n"
+            "{\"reply\": \"message here\", \"workers\": [{\"name\": \"\", \"skill\": \"\", \"area\": \"\", \"city\": \"\", \"country\": \"\", \"price\": 0, \"price_currency\": \"\", \"rating\": 0.0, \"phone\": \"\", \"experience\": \"\"}], \"quick_replies\": [\"btn1\", \"btn2\", \"btn3\"], \"booking_card\": null}\n\n"
+            "workers = [] if no match. booking_card = null always."
         )
 
         raw_reply = call_ai(prompt)
@@ -254,30 +539,27 @@ def chat():
         booking_confirmed = False
 
         if parsed:
-            # Add match score to each worker
             workers_with_score = []
             for w in parsed.get("workers", []):
                 w["match_score"] = calculate_match_score(w, user_message)
                 workers_with_score.append(w)
-
-            # Sort by match score descending
             workers_with_score.sort(key=lambda x: x.get("match_score", 0), reverse=True)
 
-            # Booking detection
-            booking_words = ["book", "confirm", "chahiye", "bhejo", "send", "haan", "ok", "theek", "karwa do", "bulao"]
+            booking_words = ["book", "confirm", "hire", "need", "send", "yes", "ok", "sure", "get me", "arrange"]
             if any(word in user_message.lower() for word in booking_words):
                 for worker in all_workers:
                     skill_match = worker.get("skill", "").lower() in user_message.lower()
                     area_match = worker.get("area", "").lower() in user_message.lower()
+                    city_match = worker.get("city", "").lower() in user_message.lower()
                     name_match = worker.get("name", "").lower() in user_message.lower()
-                    if skill_match or area_match or name_match:
-                        booking = create_booking(worker["name"], user_name, worker["skill"])
+                    if skill_match or area_match or city_match or name_match:
+                        booking = create_booking(worker, user_name)
                         booking_confirmed = True
                         parsed["booking_card"] = {
                             "worker": worker,
                             "status": "confirmed",
                             "booking_id": booking["booking_id"],
-                            "message": f"{worker['name']} aapko 30 min mein contact karenge. Booking confirmed!"
+                            "message": f"{worker['name']} will contact you within 30 minutes. Booking confirmed!"
                         }
                         break
 
@@ -290,18 +572,18 @@ def chat():
             })
         else:
             return jsonify({
-                "reply": raw_reply if raw_reply else "Dobara try karein.",
+                "reply": raw_reply if raw_reply else "Please try again.",
                 "workers": [],
-                "quick_replies": ["Plumber dhundho", "Electrician chahiye", "Maid book karo", "Driver bulao"],
+                "quick_replies": ["Find a Plumber", "Need an Electrician", "Book a Maid", "Hire a Driver"],
                 "booking_card": None,
                 "booking_confirmed": False
             })
 
     except Exception as e:
         return jsonify({
-            "reply": "Server mein thodi problem aayi. Ek minute baad dobara try karein.",
+            "reply": "Something went wrong on our end. Please try again in a moment.",
             "workers": [],
-            "quick_replies": ["Dobara try karo"],
+            "quick_replies": ["Try again"],
             "booking_card": None,
             "booking_confirmed": False
         }), 200
@@ -310,7 +592,17 @@ def chat():
 @app.route("/workers", methods=["GET"])
 def get_workers():
     try:
-        workers = list(workers_col.find({"available": True}, {"_id": 0}))
+        country = request.args.get("country", "")
+        city = request.args.get("city", "")
+        skill = request.args.get("skill", "")
+        query = {"available": True}
+        if country:
+            query["country"] = {"$regex": country, "$options": "i"}
+        if city:
+            query["city"] = {"$regex": city, "$options": "i"}
+        if skill:
+            query["skill"] = {"$regex": skill, "$options": "i"}
+        workers = list(workers_col.find(query, {"_id": 0}))
         return jsonify(workers)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -335,14 +627,14 @@ def cancel_booking():
         body = request.get_json(force=True)
         booking_id = body.get("booking_id", "")
         if not booking_id:
-            return jsonify({"error": "booking_id required"}), 400
+            return jsonify({"error": "booking_id is required"}), 400
         result = bookings_col.update_one(
             {"booking_id": booking_id},
             {"$set": {"status": "cancelled", "cancelled_at": datetime.now().isoformat()}}
         )
         if result.matched_count == 0:
-            return jsonify({"error": "Booking nahi mili"}), 404
-        return jsonify({"message": "Booking cancel ho gayi!", "booking_id": booking_id})
+            return jsonify({"error": "Booking not found"}), 404
+        return jsonify({"message": "Booking cancelled successfully.", "booking_id": booking_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -357,7 +649,7 @@ def rate_worker():
         review_text = body.get("review", "")
 
         if not worker_name or not rating:
-            return jsonify({"error": "worker_name aur rating required hai"}), 400
+            return jsonify({"error": "worker_name and rating are required"}), 400
 
         review = {
             "worker_name": worker_name,
@@ -368,51 +660,52 @@ def rate_worker():
         }
         reviews_col.insert_one(review)
 
-        # Update worker avg rating
         all_reviews = list(reviews_col.find({"worker_name": worker_name}, {"_id": 0}))
-        if all_reviews:
-            avg = sum(r["rating"] for r in all_reviews) / len(all_reviews)
-            workers_col.update_one(
-                {"name": worker_name},
-                {"$set": {"rating": round(avg, 1)}}
-            )
+        avg = sum(r["rating"] for r in all_reviews) / len(all_reviews)
+        workers_col.update_one({"name": worker_name}, {"$set": {"rating": round(avg, 1)}})
 
-        return jsonify({"message": "Rating submit ho gayi! Shukriya.", "new_avg": round(avg, 1) if all_reviews else rating})
+        return jsonify({"message": "Rating submitted successfully. Thank you!", "new_avg_rating": round(avg, 1)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 @app.route("/stats", methods=["GET"])
 def get_stats():
-    """Admin dashboard stats"""
     try:
         total_workers = workers_col.count_documents({"available": True})
         total_bookings = bookings_col.count_documents({})
         confirmed_bookings = bookings_col.count_documents({"status": "confirmed"})
         cancelled_bookings = bookings_col.count_documents({"status": "cancelled"})
+        countries = workers_col.distinct("country")
 
-        # Popular skills
-        pipeline = [
+        skill_pipeline = [
             {"$group": {"_id": "$skill", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}},
-            {"$limit": 5}
+            {"$sort": {"count": -1}}, {"$limit": 8}
         ]
-        popular_skills = list(bookings_col.aggregate(pipeline))
+        popular_skills = list(workers_col.aggregate(skill_pipeline))
 
-        # Area wise demand
-        area_pipeline = [
-            {"$group": {"_id": "$area", "count": {"$sum": 1}}},
+        city_pipeline = [
+            {"$group": {"_id": "$city", "count": {"$sum": 1}}},
             {"$sort": {"count": -1}}
         ]
-        area_demand = list(workers_col.aggregate(area_pipeline))
+        city_demand = list(workers_col.aggregate(city_pipeline))
+
+        booking_skill_pipeline = [
+            {"$group": {"_id": "$worker_skill", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}}, {"$limit": 5}
+        ]
+        top_booked_skills = list(bookings_col.aggregate(booking_skill_pipeline))
 
         return jsonify({
             "total_workers": total_workers,
+            "total_countries": len(countries),
+            "countries": countries,
             "total_bookings": total_bookings,
             "confirmed_bookings": confirmed_bookings,
             "cancelled_bookings": cancelled_bookings,
             "popular_skills": popular_skills,
-            "area_demand": area_demand
+            "city_demand": city_demand,
+            "top_booked_skills": top_booked_skills
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
