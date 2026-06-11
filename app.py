@@ -10,17 +10,17 @@ import re
 app = Flask(__name__)
 CORS(app)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 MONGO_URI = os.environ.get("MONGO_URI")
-
 client_mongo = MongoClient(MONGO_URI)
 db = client_mongo["rozgarbot"]
 workers_col = db["workers"]
 bookings_col = db["bookings"]
-reviews_col = db["reviews"]
 
 def call_ai(prompt):
     GROQ_KEY = os.environ.get("GROQ_API_KEY")
+    if not GROQ_KEY:
+        return '{"reply": "API key missing hai server pe.", "workers": [], "quick_replies": [], "booking_card": null}'
+    
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_KEY}",
@@ -28,20 +28,32 @@ def call_ai(prompt):
     }
     payload = {
         "model": "llama3-8b-8192",
-        "messages": [{"role": "user", "content": prompt}]
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 1024
     }
-    try:
-        response = http_requests.post(url, json=payload, headers=headers, timeout=30)
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
-    except Exception as e:
-        return f"Connection error: {str(e)}"
+    
+    response = http_requests.post(url, json=payload, headers=headers, timeout=30)
+    data = response.json()
+    
+    # Handle Groq errors properly
+    if "error" in data:
+        return f'{{"reply": "AI Error: {data[\"error\"].get(\"message\", \"unknown\")}", "workers": [], "quick_replies": ["Dobara try karo"], "booking_card": null}}'
+    
+    if "choices" not in data or len(data["choices"]) == 0:
+        return f'{{"reply": "Koi response nahi mila: {str(data)[:100]}", "workers": [], "quick_replies": [], "booking_card": null}}'
+    
+    return data["choices"][0]["message"]["content"]
 
 def extract_json_from_text(text):
-    """Extract JSON from AI response which may have markdown code blocks"""
     text = re.sub(r'```json\s*', '', text)
     text = re.sub(r'```\s*', '', text)
     text = text.strip()
+    # Find first { to last } in case there's extra text
+    start = text.find('{')
+    end = text.rfind('}')
+    if start != -1 and end != -1:
+        text = text[start:end+1]
     try:
         return json.loads(text)
     except Exception:
@@ -62,13 +74,14 @@ def create_booking(worker_name, user_name, date, skill):
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
-        user_message = request.json.get("message", "")
-        user_name = request.json.get("user_name", "User")
+        body = request.get_json(force=True)
+        user_message = body.get("message", "")
+        user_name = body.get("user_name", "User")
 
         all_workers = list(workers_col.find({"available": True}, {"_id": 0}))
         workers_str = json.dumps(all_workers, ensure_ascii=False)
 
-        prompt = f"""Tu RozgarBot hai — ek AI agent jo India mein daily-wage workers (plumber, electrician, maid, driver, carpenter, cook) ko households se connect karta hai.
+        prompt = f"""Tu RozgarBot hai — ek AI agent jo India mein daily-wage workers ko households se connect karta hai.
 
 Available Workers Database:
 {workers_str}
@@ -76,32 +89,16 @@ Available Workers Database:
 User ka naam: {user_name}
 User ka message: "{user_message}"
 
-IMPORTANT RULES:
-1. User ko HAMESHA unke naam "{user_name}" se address karo, kabhi "Guest" mat bolna
-2. Agar user multiple workers maange toh database se SAARE matching workers return karo
-3. Hinglish mein jawab do (Hindi + English mix)
-4. ONLY valid JSON return karo, kuch aur nahi, no markdown, no extra text
+RULES:
+1. User ko HAMESHA "{user_name}" naam se address karo, kabhi "Guest" mat bolna
+2. Agar user saare/multiple workers maange toh SAARE matching workers return karo, sirf ek nahi
+3. Hinglish mein jawab do
+4. STRICTLY sirf valid JSON return karo — koi extra text, explanation, ya markdown nahi
 
-RESPONSE FORMAT (strict JSON only):
-{{
-  "reply": "User se baat karne wala message {user_name} ka naam use karke",
-  "workers": [
-    {{
-      "name": "worker name",
-      "skill": "skill",
-      "area": "area",
-      "price": 300,
-      "rating": 4.5,
-      "phone": "phone number"
-    }}
-  ],
-  "quick_replies": ["Button 1", "Button 2", "Button 3"],
-  "booking_card": null
-}}
+JSON FORMAT (exactly this structure):
+{{"reply": "message here using name {user_name}", "workers": [{{"name": "", "skill": "", "area": "", "price": 0, "rating": 0.0, "phone": ""}}], "quick_replies": ["btn1", "btn2", "btn3"], "booking_card": null}}
 
-- workers array mein SAARE matching workers dalo (empty array [] agar koi nahi mila)
-- booking_card null rakho jab tak booking confirm na ho
-- STRICTLY only JSON, no extra explanation"""
+workers = empty array [] agar koi match nahi. booking_card = null always unless booking confirmed."""
 
         raw_reply = call_ai(prompt)
         parsed = extract_json_from_text(raw_reply)
@@ -111,15 +108,16 @@ RESPONSE FORMAT (strict JSON only):
         if parsed:
             if any(word in user_message.lower() for word in ["book", "confirm", "chahiye", "bhejo", "send", "haan", "ok"]):
                 for worker in all_workers:
-                    if worker.get("skill", "").lower() in user_message.lower() or \
-                       worker.get("area", "").lower() in user_message.lower() or \
-                       worker.get("name", "").lower() in user_message.lower():
+                    skill_match = worker.get("skill", "").lower() in user_message.lower()
+                    area_match = worker.get("area", "").lower() in user_message.lower()
+                    name_match = worker.get("name", "").lower() in user_message.lower()
+                    if skill_match or area_match or name_match:
                         create_booking(worker["name"], user_name, datetime.now().isoformat(), worker["skill"])
                         booking_confirmed = True
                         parsed["booking_card"] = {
                             "worker": worker,
                             "status": "confirmed",
-                            "message": f"Booking confirmed! {worker['name']} aapko jald hi contact karenge."
+                            "message": f"Booking confirmed! {worker['name']} aapko 30 min mein contact karenge."
                         }
                         break
 
@@ -131,11 +129,10 @@ RESPONSE FORMAT (strict JSON only):
                 "booking_confirmed": booking_confirmed
             })
         else:
-            # Fallback if JSON parsing fails
             return jsonify({
-                "reply": raw_reply if raw_reply else "Kuch problem ho gayi, dobara try karein.",
+                "reply": raw_reply if raw_reply else "Dobara try karein.",
                 "workers": [],
-                "quick_replies": ["Plumber dhundho", "Electrician chahiye", "Maid book karo"],
+                "quick_replies": ["Plumber dhundho", "Electrician chahiye", "Maid book karo", "Driver bulao"],
                 "booking_card": None,
                 "booking_confirmed": False
             })
@@ -147,7 +144,7 @@ RESPONSE FORMAT (strict JSON only):
             "quick_replies": ["Dobara try karo"],
             "booking_card": None,
             "booking_confirmed": False
-        }), 200  # Return 200 so frontend doesn't show connection error
+        }), 200
 
 @app.route("/workers", methods=["GET"])
 def get_workers():
@@ -167,7 +164,7 @@ def get_bookings():
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"status": "RozgarBot API is running!", "version": "3.0"})
+    return jsonify({"status": "RozgarBot API is running!", "version": "4.0"})
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
