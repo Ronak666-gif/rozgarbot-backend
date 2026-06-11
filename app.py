@@ -20,24 +20,20 @@ bookings_col = db["bookings"]
 reviews_col = db["reviews"]
 
 def call_ai(prompt):
-    url = "https://freemodel.dev/v1/chat/completions"
+    GROQ_KEY = os.environ.get("GROQ_API_KEY")
+    url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
-        "Authorization": "Bearer fe_oa_a8c933b6689a9f89d1f9ff778d4a17e64c864a4ab502e54e",
+        "Authorization": f"Bearer {GROQ_KEY}",
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "gpt-4o-mini",
+        "model": "llama3-8b-8192",
         "messages": [{"role": "user", "content": prompt}]
     }
     try:
         response = http_requests.post(url, json=payload, headers=headers, timeout=30)
-        # freemodel returns plain text or JSON — handle both safely
-        try:
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
-        except Exception:
-            # If JSON parse fails, return raw text
-            return response.text
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
     except Exception as e:
         return f"Connection error: {str(e)}"
 
