@@ -514,6 +514,17 @@ def chat():
             })
 
         all_workers = list(workers_col.find({"available": True}, {"_id": 0}))
+
+        # Smart filter — skill/city match karo pehle, phir top 10 bhejo AI ko
+        user_msg_lower = user_message.lower()
+        relevant = [w for w in all_workers if 
+            w.get("skill","").lower() in user_msg_lower or
+            w.get("city","").lower() in user_msg_lower or
+            w.get("country","").lower() in user_msg_lower
+        ]
+        # Agar koi match nahi toh random 8 bhejo
+        workers_for_ai = relevant[:10] if relevant else all_workers[:8]
+        workers_str = json.dumps(workers_for_ai, ensure_ascii=False)
         workers_str = json.dumps(all_workers, ensure_ascii=False)
 
         prompt = (
