@@ -525,15 +525,6 @@ def chat():
         # Agar koi match nahi toh random 8 bhejo
         workers_for_ai = relevant[:10] if relevant else all_workers[:8]
         workers_str = json.dumps(workers_for_ai, ensure_ascii=False)
-        # Smart filter — only relevant workers send to AI (max 10)
-        user_msg_lower = user_message.lower()
-        relevant = [w for w in all_workers if 
-            w.get("skill","").lower() in user_msg_lower or
-            w.get("city","").lower() in user_msg_lower or
-            w.get("country","").lower() in user_msg_lower
-        ]
-        workers_for_ai = relevant[:10] if relevant else all_workers[:8]
-        workers_str = json.dumps(workers_for_ai, ensure_ascii=False)
 
         prompt = (
             "You are RozgarBot — a global AI-powered platform connecting daily-wage workers with households and businesses worldwide.\n\n"
